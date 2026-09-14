@@ -16,21 +16,13 @@ pub fn check(schema: &Schema, root: Node) -> Vec<ValidationIssue> {
     let path = format!("/{name}");
     match schema.elements.get(name) {
         Some(declaration) => element(schema, declaration, root, &path, &mut issues),
-        None => issues.push(issue(
+        None => issues.push(ValidationIssue::at(
             "root",
             &format!("element {name} is not declared"),
             &path,
         )),
     }
     issues
-}
-
-fn issue(code: &str, message: &str, path: &str) -> ValidationIssue {
-    ValidationIssue {
-        code: code.to_string(),
-        message: message.to_string(),
-        path: Some(path.to_string()),
-    }
 }
 
 fn element(
@@ -48,7 +40,11 @@ fn element(
         }
         Kind::Named(name) => match schema.types.get(name) {
             Some(complex) => complex_type(schema, complex, node, path, out),
-            None => out.push(issue("type", &format!("type {name} is not declared"), path)),
+            None => out.push(ValidationIssue::at(
+                "type",
+                &format!("type {name} is not declared"),
+                path,
+            )),
         },
         Kind::Inline(complex) => complex_type(schema, complex, node, path, out),
     }
@@ -80,7 +76,11 @@ fn attributes(complex: &ComplexType, node: Node, path: &str, out: &mut Vec<Valid
         match node.attribute(declared.name.as_str()) {
             Some(text) => value(&declared.builtin, text, &at, out),
             None if declared.required => {
-                out.push(issue("attribute", "required attribute is missing", &at));
+                out.push(ValidationIssue::at(
+                    "attribute",
+                    "required attribute is missing",
+                    &at,
+                ));
             }
             None => {}
         }
@@ -92,7 +92,11 @@ fn attributes(complex: &ComplexType, node: Node, path: &str, out: &mut Vec<Valid
         }
         if !complex.attributes.iter().any(|a| a.name == present.name()) {
             let at = format!("{path}/@{}", present.name());
-            out.push(issue("attribute", "attribute is not declared", &at));
+            out.push(ValidationIssue::at(
+                "attribute",
+                "attribute is not declared",
+                &at,
+            ));
         }
     }
 }
@@ -100,7 +104,11 @@ fn attributes(complex: &ComplexType, node: Node, path: &str, out: &mut Vec<Valid
 fn reject_children(node: Node, path: &str, out: &mut Vec<ValidationIssue>) {
     for child in node.children().filter(Node::is_element) {
         let at = format!("{path}/{}", child.tag_name().name());
-        out.push(issue("content", "no child element is allowed here", &at));
+        out.push(ValidationIssue::at(
+            "content",
+            "no child element is allowed here",
+            &at,
+        ));
     }
 }
 
@@ -141,7 +149,11 @@ fn sequence(
     }
     for child in &children[next..] {
         let at = format!("{path}/{}", child.tag_name().name());
-        out.push(issue("content", "element is not expected here", &at));
+        out.push(ValidationIssue::at(
+            "content",
+            "element is not expected here",
+            &at,
+        ));
     }
 }
 
@@ -184,13 +196,13 @@ fn choice(
         [] => {
             let names: Vec<&str> = particles.iter().map(|p| p.name.as_str()).collect();
             let message = format!("one of {} is required", names.join(", "));
-            out.push(issue("occurs", &message, path));
+            out.push(ValidationIssue::at("occurs", &message, path));
         }
         [one] => all(schema, std::slice::from_ref(*one), node, path, out),
         many => {
             let names: Vec<&str> = many.iter().map(|p| p.name.as_str()).collect();
             let message = format!("only one of {} may appear", names.join(", "));
-            out.push(issue("content", &message, path));
+            out.push(ValidationIssue::at("content", &message, path));
         }
     }
     unexpected(particles, &children, path, out);
@@ -205,7 +217,7 @@ fn unexpected(
     for child in children {
         let name = child.tag_name().name();
         if !particles.iter().any(|p| p.name == name) {
-            out.push(issue(
+            out.push(ValidationIssue::at(
                 "content",
                 "element is not expected here",
                 &format!("{path}/{name}"),
@@ -218,13 +230,13 @@ fn occurs(particle: &Element, count: u32, path: &str, out: &mut Vec<ValidationIs
     let at = format!("{path}/{}", particle.name);
     if count < particle.min {
         let message = format!("occurs {count} times, at least {} required", particle.min);
-        out.push(issue("occurs", &message, &at));
+        out.push(ValidationIssue::at("occurs", &message, &at));
     }
     if let Some(max) = particle.max
         && count > max
     {
         let message = format!("occurs {count} times, at most {max} allowed");
-        out.push(issue("occurs", &message, &at));
+        out.push(ValidationIssue::at("occurs", &message, &at));
     }
 }
 
@@ -250,7 +262,7 @@ fn value(builtin: &str, text: &str, path: &str, out: &mut Vec<ValidationIssue>) 
         _ => true,
     };
     if !held {
-        out.push(issue(
+        out.push(ValidationIssue::at(
             "value",
             &format!("{text:?} is not an xs:{builtin}"),
             path,

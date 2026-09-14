@@ -216,12 +216,7 @@ fn is_xs(node: Node, name: &str) -> bool {
 fn required(node: Node, attribute: &str) -> Result<String, ContractError> {
     node.attribute(attribute)
         .map(str::to_string)
-        .ok_or_else(|| {
-            refuse(format!(
-                "xs:{} without {attribute}",
-                node.tag_name().name()
-            ))
-        })
+        .ok_or_else(|| refuse(format!("xs:{} without {attribute}", node.tag_name().name())))
 }
 
 /// `Ok(None)` is unbounded; `Err` when the attribute is present but unreadable.

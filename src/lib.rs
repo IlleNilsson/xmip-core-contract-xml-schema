@@ -112,10 +112,7 @@ impl Contract for XmlSchema {
             Some(schema) => check::check(schema, document.root_element()),
             None => Vec::new(),
         };
-        Ok(ValidationResult {
-            valid: issues.is_empty(),
-            issues,
-        })
+        Ok(ValidationResult::of(issues))
     }
 }
 
@@ -127,14 +124,7 @@ fn is_xml_media_type(media_type: &str) -> bool {
 }
 
 fn malformed(message: &str, path: Option<String>) -> ValidationResult {
-    ValidationResult {
-        valid: false,
-        issues: vec![ValidationIssue {
-            code: "malformed".to_string(),
-            message: message.to_string(),
-            path,
-        }],
-    }
+    ValidationResult::of(vec![ValidationIssue::new("malformed", message, path)])
 }
 
 /// Loads the contract a Location names: an empty reference is the bare
@@ -160,15 +150,7 @@ impl ContractFactory for XmlSchemaFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use xcore::StreamId;
-
-    fn stream(text: &str, media_type: Option<&str>) -> Stream {
-        Stream::new(
-            StreamId::new(1),
-            text.as_bytes().to_vec(),
-            media_type.map(str::to_string),
-        )
-    }
+    use contract::fixture::stream_as as stream;
 
     const ORDER: &str = r#"<?xml version="1.0"?>
 <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"

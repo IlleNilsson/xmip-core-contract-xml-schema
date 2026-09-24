@@ -17,11 +17,11 @@
 pub mod check;
 pub mod schema;
 
-use contract::{
+use schema::Schema;
+use sdk::contract::{
     Contract, ContractDescriptor, ContractError, ContractFactory, ContractId, ValidationIssue,
     ValidationResult,
 };
-use schema::Schema;
 use stream::Stream;
 
 /// The XML contract, bare or bound to a schema.

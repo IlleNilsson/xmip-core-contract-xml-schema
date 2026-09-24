@@ -5,8 +5,8 @@
 //! `/order/line[2]/qty`, `/order/@currency`.
 
 use crate::schema::{ComplexType, Content, Element, Kind, Schema};
-use contract::ValidationIssue;
 use roxmltree::Node;
+use sdk::contract::ValidationIssue;
 
 /// Every departure of the document rooted at `root` from `schema`.
 #[must_use]

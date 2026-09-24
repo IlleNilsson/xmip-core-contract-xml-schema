@@ -13,8 +13,8 @@
 //! compositors, `import` and `include`. A refused schema is a configuration
 //! error, which is where an operator wants to hear about it.
 
-use contract::ContractError;
 use roxmltree::Node;
+use sdk::contract::ContractError;
 use std::collections::BTreeMap;
 
 pub const XS: &str = "http://www.w3.org/2001/XMLSchema";

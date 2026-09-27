@@ -5,7 +5,9 @@
 //! `/order/line[2]/qty`, `/order/@currency`.
 
 use crate::schema::{ComplexType, Content, Element, Kind, Schema};
+use codec::civil;
 use contract::ValidationIssue;
+use contract::place::Place;
 use roxmltree::Node;
 
 /// Every departure of the document rooted at `root` from `schema`.
@@ -13,13 +15,14 @@ use roxmltree::Node;
 pub fn check(schema: &Schema, root: Node) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
     let name = root.tag_name().name();
-    let path = format!("/{name}");
+    let top = Place::Root;
+    let place = top.field(name);
     match schema.elements.get(name) {
-        Some(declaration) => element(schema, declaration, root, &path, &mut issues),
+        Some(declaration) => element(schema, declaration, root, &place, &mut issues),
         None => issues.push(ValidationIssue::at(
             "root",
-            &format!("element {name} is not declared"),
-            &path,
+            format!("element {name} is not declared"),
+            place.xpath(),
         )),
     }
     issues
@@ -29,24 +32,24 @@ fn element(
     schema: &Schema,
     declaration: &Element,
     node: Node,
-    path: &str,
+    place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
     match &declaration.kind {
         Kind::Any => {}
         Kind::Builtin(builtin) => {
-            reject_children(node, path, out);
-            value(builtin, text_of(node), path, out);
+            reject_children(node, place, out);
+            value(builtin, text_of(node), place, out);
         }
         Kind::Named(name) => match schema.types.get(name) {
-            Some(complex) => complex_type(schema, complex, node, path, out),
+            Some(complex) => complex_type(schema, complex, node, place, out),
             None => out.push(ValidationIssue::at(
                 "type",
-                &format!("type {name} is not declared"),
-                path,
+                format!("type {name} is not declared"),
+                place.xpath(),
             )),
         },
-        Kind::Inline(complex) => complex_type(schema, complex, node, path, out),
+        Kind::Inline(complex) => complex_type(schema, complex, node, place, out),
     }
 }
 
@@ -54,32 +57,37 @@ fn complex_type(
     schema: &Schema,
     complex: &ComplexType,
     node: Node,
-    path: &str,
+    place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
-    attributes(complex, node, path, out);
+    attributes(complex, node, place, out);
     match &complex.content {
-        Content::Empty => reject_children(node, path, out),
+        Content::Empty => reject_children(node, place, out),
         Content::Simple(builtin) => {
-            reject_children(node, path, out);
-            value(builtin, text_of(node), path, out);
+            reject_children(node, place, out);
+            value(builtin, text_of(node), place, out);
         }
-        Content::Sequence(particles) => sequence(schema, particles, node, path, out),
-        Content::All(particles) => all(schema, particles, node, path, out),
-        Content::Choice(particles) => choice(schema, particles, node, path, out),
+        Content::Sequence(particles) => sequence(schema, particles, node, place, out),
+        Content::All(particles) => all(schema, particles, node, place, out),
+        Content::Choice(particles) => choice(schema, particles, node, place, out),
     }
 }
 
-fn attributes(complex: &ComplexType, node: Node, path: &str, out: &mut Vec<ValidationIssue>) {
+fn attributes(
+    complex: &ComplexType,
+    node: Node,
+    place: &Place<'_>,
+    out: &mut Vec<ValidationIssue>,
+) {
     for declared in &complex.attributes {
-        let at = format!("{path}/@{}", declared.name);
+        let at = place.attribute(&declared.name);
         match node.attribute(declared.name.as_str()) {
             Some(text) => value(&declared.builtin, text, &at, out),
             None if declared.required => {
                 out.push(ValidationIssue::at(
                     "attribute",
                     "required attribute is missing",
-                    &at,
+                    at.xpath(),
                 ));
             }
             None => {}
@@ -91,23 +99,21 @@ fn attributes(complex: &ComplexType, node: Node, path: &str, out: &mut Vec<Valid
             continue;
         }
         if !complex.attributes.iter().any(|a| a.name == present.name()) {
-            let at = format!("{path}/@{}", present.name());
             out.push(ValidationIssue::at(
                 "attribute",
                 "attribute is not declared",
-                &at,
+                place.attribute(present.name()).xpath(),
             ));
         }
     }
 }
 
-fn reject_children(node: Node, path: &str, out: &mut Vec<ValidationIssue>) {
+fn reject_children(node: Node, place: &Place<'_>, out: &mut Vec<ValidationIssue>) {
     for child in node.children().filter(Node::is_element) {
-        let at = format!("{path}/{}", child.tag_name().name());
         out.push(ValidationIssue::at(
             "content",
             "no child element is allowed here",
-            &at,
+            place.field(child.tag_name().name()).xpath(),
         ));
     }
 }
@@ -116,12 +122,22 @@ fn text_of<'a>(node: Node<'a, '_>) -> &'a str {
     node.text().unwrap_or("")
 }
 
-fn child_path(path: &str, particle: &Element, ordinal: u32) -> String {
-    // An ordinal only where the schema lets the element repeat: `line[2]`, but
-    // `qty`, so a path reads the way the operator wrote the schema.
-    match particle.max {
-        Some(1) => format!("{path}/{}", particle.name),
-        _ => format!("{path}/{}[{ordinal}]", particle.name),
+/// Check `node` as the `count`th `particle` under `place`: an ordinal only
+/// where the schema lets the element repeat, `line[2]` but `qty`, so a path
+/// reads the way the operator wrote the schema.
+fn within(
+    schema: &Schema,
+    particle: &Element,
+    node: Node,
+    place: &Place<'_>,
+    count: u32,
+    out: &mut Vec<ValidationIssue>,
+) {
+    let named = place.field(&particle.name);
+    if particle.max == Some(1) {
+        element(schema, particle, node, &named, out);
+    } else {
+        element(schema, particle, node, &named.index(count as usize), out);
     }
 }
 
@@ -129,7 +145,7 @@ fn sequence(
     schema: &Schema,
     particles: &[Element],
     node: Node,
-    path: &str,
+    place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
     let children: Vec<Node> = node.children().filter(Node::is_element).collect();
@@ -141,18 +157,16 @@ fn sequence(
             && particle.max.is_none_or(|max| count < max)
         {
             count += 1;
-            let at = child_path(path, particle, count);
-            element(schema, particle, children[next], &at, out);
+            within(schema, particle, children[next], place, count, out);
             next += 1;
         }
-        occurs(particle, count, path, out);
+        occurs(particle, count, place, out);
     }
     for child in &children[next..] {
-        let at = format!("{path}/{}", child.tag_name().name());
         out.push(ValidationIssue::at(
             "content",
             "element is not expected here",
-            &at,
+            place.field(child.tag_name().name()).xpath(),
         ));
     }
 }
@@ -161,7 +175,7 @@ fn all(
     schema: &Schema,
     particles: &[Element],
     node: Node,
-    path: &str,
+    place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
     let children: Vec<Node> = node.children().filter(Node::is_element).collect();
@@ -172,19 +186,18 @@ fn all(
             .filter(|c| c.tag_name().name() == particle.name)
         {
             count += 1;
-            let at = child_path(path, particle, count);
-            element(schema, particle, *child, &at, out);
+            within(schema, particle, *child, place, count, out);
         }
-        occurs(particle, count, path, out);
+        occurs(particle, count, place, out);
     }
-    unexpected(particles, &children, path, out);
+    unexpected(particles, &children, place, out);
 }
 
 fn choice(
     schema: &Schema,
     particles: &[Element],
     node: Node,
-    path: &str,
+    place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
     let children: Vec<Node> = node.children().filter(Node::is_element).collect();
@@ -196,22 +209,22 @@ fn choice(
         [] => {
             let names: Vec<&str> = particles.iter().map(|p| p.name.as_str()).collect();
             let message = format!("one of {} is required", names.join(", "));
-            out.push(ValidationIssue::at("occurs", &message, path));
+            out.push(ValidationIssue::at("occurs", message, place.xpath()));
         }
-        [one] => all(schema, std::slice::from_ref(*one), node, path, out),
+        [one] => all(schema, std::slice::from_ref(*one), node, place, out),
         many => {
             let names: Vec<&str> = many.iter().map(|p| p.name.as_str()).collect();
             let message = format!("only one of {} may appear", names.join(", "));
-            out.push(ValidationIssue::at("content", &message, path));
+            out.push(ValidationIssue::at("content", message, place.xpath()));
         }
     }
-    unexpected(particles, &children, path, out);
+    unexpected(particles, &children, place, out);
 }
 
 fn unexpected(
     particles: &[Element],
     children: &[Node],
-    path: &str,
+    place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
     for child in children {
@@ -220,29 +233,31 @@ fn unexpected(
             out.push(ValidationIssue::at(
                 "content",
                 "element is not expected here",
-                &format!("{path}/{name}"),
+                place.field(name).xpath(),
             ));
         }
     }
 }
 
-fn occurs(particle: &Element, count: u32, path: &str, out: &mut Vec<ValidationIssue>) {
-    let at = format!("{path}/{}", particle.name);
+fn occurs(particle: &Element, count: u32, place: &Place<'_>, out: &mut Vec<ValidationIssue>) {
+    let at = || place.field(&particle.name).xpath();
     if count < particle.min {
         let message = format!("occurs {count} times, at least {} required", particle.min);
-        out.push(ValidationIssue::at("occurs", &message, &at));
+        out.push(ValidationIssue::at("occurs", message, at()));
     }
     if let Some(max) = particle.max
         && count > max
     {
         let message = format!("occurs {count} times, at most {max} allowed");
-        out.push(ValidationIssue::at("occurs", &message, &at));
+        out.push(ValidationIssue::at("occurs", message, at()));
     }
 }
 
 /// A built-in simple type's lexical check. Unknown names hold: a type this
-/// contract does not check is not a type it refuses.
-fn value(builtin: &str, text: &str, path: &str, out: &mut Vec<ValidationIssue>) {
+/// contract does not check is not a type it refuses. Dates and times are read
+/// by the estate's one calendar (`codec::civil`), each field in its range; a
+/// time zone is optional, as XML Schema says.
+fn value(builtin: &str, text: &str, place: &Place<'_>, out: &mut Vec<ValidationIssue>) {
     let text = text.trim();
     let held = match builtin {
         "boolean" => matches!(text, "true" | "false" | "1" | "0"),
@@ -254,50 +269,32 @@ fn value(builtin: &str, text: &str, path: &str, out: &mut Vec<ValidationIssue>) 
         "nonPositiveInteger" => text.parse::<i64>().is_ok_and(|n| n <= 0),
         "decimal" => text.parse::<f64>().is_ok() && !text.eq_ignore_ascii_case("nan"),
         "double" | "float" => text.parse::<f64>().is_ok() || matches!(text, "INF" | "-INF" | "NaN"),
-        "date" => is_date(text),
+        "date" => text
+            .get(..10)
+            .and_then(civil::read_date)
+            .is_some_and(|_| zoned(&text[10..])),
         "dateTime" => text
             .split_once('T')
-            .is_some_and(|(d, t)| is_date(d) && is_time(t)),
+            .is_some_and(|(date, time)| civil::read_date(date).is_some() && is_time(time)),
         "time" => is_time(text),
         _ => true,
     };
     if !held {
         out.push(ValidationIssue::at(
             "value",
-            &format!("{text:?} is not an xs:{builtin}"),
-            path,
+            format!("{text:?} is not an xs:{builtin}"),
+            place.xpath(),
         ));
     }
 }
 
-fn is_date(text: &str) -> bool {
-    let core = text
-        .trim_end_matches('Z')
-        .split(['+', '-'])
-        .next()
-        .unwrap_or("");
-    let parts: Vec<&str> = text
-        .get(..core.len().max(10))
-        .unwrap_or("")
-        .split('-')
-        .collect();
-    parts.len() == 3
-        && parts[0].len() == 4
-        && parts[1].len() == 2
-        && parts[2].len() == 2
-        && parts.iter().all(|p| p.bytes().all(|b| b.is_ascii_digit()))
+/// A time zone, or none: what may follow an XML Schema date or time.
+fn zoned(rest: &str) -> bool {
+    rest.is_empty() || civil::read_offset(rest).is_some()
 }
 
 fn is_time(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    bytes.len() >= 8
-        && bytes[..8].iter().enumerate().all(|(i, b)| {
-            if i == 2 || i == 5 {
-                *b == b':'
-            } else {
-                b.is_ascii_digit()
-            }
-        })
+    civil::read_time(text).is_some_and(|(_, rest)| zoned(rest))
 }
 
 #[cfg(test)]
@@ -309,7 +306,7 @@ mod tests {
         let document = roxmltree::Document::parse(document).expect("document");
         check(&schema, document.root_element())
             .into_iter()
-            .map(|i| (i.code, i.path.unwrap_or_default()))
+            .map(|i| (i.code.into_owned(), i.path.unwrap_or_default()))
             .collect()
     }
 
@@ -356,16 +353,32 @@ mod tests {
     #[test]
     fn built_in_values_are_checked_lexically() {
         let mut out = Vec::new();
-        value("date", "2026-09-07", "/d", &mut out);
-        value("dateTime", "2026-09-07T13:45:00Z", "/dt", &mut out);
-        value("time", "13:45:00", "/t", &mut out);
-        value("boolean", "true", "/b", &mut out);
-        value("decimal", "-1.50", "/n", &mut out);
-        value("customType", "anything", "/c", &mut out);
+        let at = Place::Root;
+        value("date", "2026-09-07", &at, &mut out);
+        value("date", "2026-09-07+02:00", &at, &mut out);
+        value("dateTime", "2026-09-07T13:45:00Z", &at, &mut out);
+        value("dateTime", "2026-09-07T13:45:00.5", &at, &mut out);
+        value("time", "13:45:00", &at, &mut out);
+        value("boolean", "true", &at, &mut out);
+        value("decimal", "-1.50", &at, &mut out);
+        value("customType", "anything", &at, &mut out);
         assert!(out.is_empty(), "{out:?}");
-        value("date", "7/9/2026", "/d", &mut out);
-        value("positiveInteger", "0", "/p", &mut out);
-        value("boolean", "yes", "/b", &mut out);
+        value("date", "7/9/2026", &at, &mut out);
+        value("positiveInteger", "0", &at, &mut out);
+        value("boolean", "yes", &at, &mut out);
         assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn a_date_is_held_to_the_calendar() {
+        let mut out = Vec::new();
+        let at = Place::Root;
+        for wrong in ["2026-99-99", "2026-02-31", "2026-02-29", "2026-13-01"] {
+            value("date", wrong, &at, &mut out);
+            value("dateTime", &format!("{wrong}T00:00:00"), &at, &mut out);
+        }
+        value("time", "25:00:00", &at, &mut out);
+        value("time", "12:00:00+99:00", &at, &mut out);
+        assert_eq!(out.len(), 10, "{out:?}");
     }
 }

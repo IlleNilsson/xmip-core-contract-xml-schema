@@ -94,7 +94,7 @@ impl Contract for XmlSchema {
     }
 
     fn validate(&self, stream: &Stream) -> Result<ValidationResult, ContractError> {
-        let text = match std::str::from_utf8(stream.bytes()) {
+        let text = match stream.text() {
             Ok(text) => text,
             Err(error) => return Ok(malformed(&format!("not UTF-8 text: {error}"), None)),
         };
@@ -221,6 +221,27 @@ mod tests {
     }
 
     #[test]
+    fn a_conforming_order_costs_only_its_own_walk() {
+        let bound = XmlSchema::with_schema(ORDER).expect("a schema");
+        let order = stream(
+            r#"<order xmlns="urn:example:order" currency="SEK"><id>A1</id>
+            <line><sku>X</sku><qty>2</qty></line></order>"#,
+            None,
+        );
+        let started = std::time::Instant::now();
+        for _ in 0..10_000 {
+            assert!(bound.validate(&order).expect("validates").valid);
+        }
+        // Generous for a debug build on a loaded machine; a path spelled per
+        // element, or the schema read per message, is what it catches.
+        let each = started.elapsed() / 10_000;
+        assert!(
+            each < std::time::Duration::from_micros(500),
+            "{each:?} a message"
+        );
+    }
+
+    #[test]
     fn bound_contract_names_every_departure_with_its_path() {
         let bound = XmlSchema::with_schema(ORDER).expect("a schema");
         let text = r"<order><id>A1</id><line><sku>X</sku><qty>0</qty></line><extra/></order>";
@@ -229,7 +250,7 @@ mod tests {
         let seen: Vec<(String, String)> = held
             .issues
             .iter()
-            .map(|i| (i.code.clone(), i.path.clone().unwrap_or_default()))
+            .map(|i| (i.code.to_string(), i.path.clone().unwrap_or_default()))
             .collect();
         let has = |code: &str, path: &str| seen.iter().any(|(c, p)| c == code && p == path);
         assert!(has("attribute", "/order/@currency"), "{seen:?}");

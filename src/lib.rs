@@ -23,6 +23,7 @@ use contract::{
 };
 use schema::Schema;
 use stream::Stream;
+use xcore::settings::{Applies, Kind, Presence, Setting, Settings};
 
 /// The XML contract, bare or bound to a schema.
 pub struct XmlSchema {
@@ -136,6 +137,10 @@ impl ContractFactory for XmlSchemaFactory {
         "xml-schema"
     }
 
+    fn settings(&self) -> &'static Settings {
+        SETTINGS
+    }
+
     fn load(&self, reference: &str) -> Result<Box<dyn Contract>, ContractError> {
         if reference.trim().is_empty() {
             return Ok(Box::new(XmlSchema::new()));
@@ -146,6 +151,18 @@ impl ContractFactory for XmlSchemaFactory {
         Ok(Box::new(XmlSchema::with_schema(&text)?))
     }
 }
+
+/// What a Location gives this contract (ADR-0064, amendment 2026-09-26).
+const SETTINGS: &Settings = &Settings {
+    technology: env!("CARGO_PKG_NAME"),
+    settings: &[Setting {
+        name: "reference",
+        kind: Kind::Address,
+        presence: Presence::Optional,
+        meaning: "The path of the XML Schema documents are held to; left out, any XML holds.",
+        applies: Applies::Both,
+    }],
+};
 
 #[cfg(test)]
 mod tests {
@@ -259,6 +276,39 @@ mod tests {
             factory
                 .load(dir.join("missing.xsd").to_str().expect("path"))
                 .is_err()
+        );
+    }
+
+    #[test]
+    fn xml_schema_declares_its_settings_and_reads_through_them() {
+        assert!(SETTINGS.problems().is_empty(), "{:?}", SETTINGS.problems());
+        let given = |name: &str, value: &str| {
+            (
+                name.to_string(),
+                xcore::settings::Given::Text(value.to_string()),
+            )
+        };
+        assert!(XmlSchemaFactory.open(Applies::Both, &[]).is_ok(), "bare");
+        let unread = XmlSchemaFactory
+            .open(
+                Applies::Receive,
+                &[given("reference", "/no/such/order.xsd")],
+            )
+            .err()
+            .expect("an unread file is refused");
+        assert!(
+            unread.message.contains("/no/such/order.xsd"),
+            "{}",
+            unread.message
+        );
+        let refused = XmlSchemaFactory
+            .open(Applies::Send, &[given("unheard_of", "x")])
+            .err()
+            .expect("an unknown setting is refused");
+        assert!(
+            refused.message.contains("unheard_of"),
+            "{}",
+            refused.message
         );
     }
 }

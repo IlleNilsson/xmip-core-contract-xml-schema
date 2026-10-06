@@ -10,6 +10,11 @@ that refers to this contract with a schema bound has every Stream validated
 against that schema, and each departure is reported with the XPath of where it
 happened and what refused it.
 
+The claims are this crate's when it is called, and the Playground calls it.
+A node holding a Location's Streams to it is
+[decided, not built](../../../../../doc/architecture/estate-map.md#arrival-validation): a node refuses to start a
+Location that names a contract until it does.
+
 `src/schema.rs` lists the XML Schema subset supported. A schema outside it is
 refused when bound, by name, so the operator learns at configuration time. The
 XPath of a departure is spelled only when one is raised, and `xs:date`,

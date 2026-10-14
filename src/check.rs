@@ -319,7 +319,10 @@ mod tests {
             <xs:element name="a" type="xs:string"/><xs:element name="b" type="xs:string"/>
             </xs:choice></xs:complexType></xs:element></xs:schema>"#
         );
-        assert!(issues(&schema, "<p><a/></p>").is_empty());
+        assert_eq!(
+            issues(&schema, "<p><a/></p>"),
+            [] as [(std::string::String, std::string::String); 0]
+        );
         assert_eq!(issues(&schema, "<p/>")[0].0, "occurs");
         assert_eq!(issues(&schema, "<p><a/><b/></p>")[0].0, "content");
     }
@@ -331,7 +334,10 @@ mod tests {
             <xs:element name="a" type="xs:int"/><xs:element name="b" type="xs:int"/>
             </xs:all></xs:complexType></xs:element></xs:schema>"#
         );
-        assert!(issues(&schema, "<p><b>1</b><a>2</a></p>").is_empty());
+        assert_eq!(
+            issues(&schema, "<p><b>1</b><a>2</a></p>"),
+            [] as [(std::string::String, std::string::String); 0]
+        );
         let twice = issues(&schema, "<p><a>1</a><a>2</a><b>3</b></p>");
         assert_eq!(twice, [("occurs".to_string(), "/p/a".to_string())]);
     }

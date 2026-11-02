@@ -169,26 +169,9 @@ mod tests {
     use super::*;
     use contract::fixture::stream_as as stream;
 
-    const ORDER: &str = r#"<?xml version="1.0"?>
-<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
-           targetNamespace="urn:example:order" elementFormDefault="qualified">
-  <xs:element name="order">
-    <xs:complexType>
-      <xs:sequence>
-        <xs:element name="id" type="xs:string"/>
-        <xs:element name="line" type="Line" minOccurs="1" maxOccurs="unbounded"/>
-        <xs:element name="note" type="xs:string" minOccurs="0"/>
-      </xs:sequence>
-      <xs:attribute name="currency" type="xs:string" use="required"/>
-    </xs:complexType>
-  </xs:element>
-  <xs:complexType name="Line">
-    <xs:sequence>
-      <xs:element name="sku" type="xs:string"/>
-      <xs:element name="qty" type="xs:positiveInteger"/>
-    </xs:sequence>
-  </xs:complexType>
-</xs:schema>"#;
+    #[path = "../../tests/measured/order.rs"]
+    mod order;
+    use order::ORDER;
 
     #[test]
     fn bare_contract_holds_well_formed_xml_only() {
@@ -218,27 +201,6 @@ mod tests {
 </order>"#;
         let held = bound.validate(&stream(text, None)).expect("validates");
         assert!(held.valid, "issues: {:?}", held.issues);
-    }
-
-    #[test]
-    fn a_conforming_order_costs_only_its_own_walk() {
-        let bound = XmlSchema::with_schema(ORDER).expect("a schema");
-        let order = stream(
-            r#"<order xmlns="urn:example:order" currency="SEK"><id>A1</id>
-            <line><sku>X</sku><qty>2</qty></line></order>"#,
-            None,
-        );
-        let started = std::time::Instant::now();
-        for _ in 0..10_000 {
-            assert!(bound.validate(&order).expect("validates").valid);
-        }
-        // Generous for a debug build on a loaded machine; a path spelled per
-        // element, or the schema read per message, is what it catches.
-        let each = started.elapsed() / 10_000;
-        assert!(
-            each < std::time::Duration::from_micros(500),
-            "{each:?} a message"
-        );
     }
 
     #[test]

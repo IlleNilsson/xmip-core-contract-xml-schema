@@ -10,7 +10,7 @@ that refers to this contract with a schema bound has every Stream validated
 against that schema, and each departure is reported with the XPath of where it
 happened and what refused it.
 
-The claims are this crate's when it is called, and the Playground calls it.
+The claims are this crate's when it is called, and the Essentials calls it.
 A node holding a Location's Streams to it is
 [decided, not built](../../../../../doc/architecture/estate-map.md#arrival-validation): a node refuses to start a
 Location that names a contract until it does.

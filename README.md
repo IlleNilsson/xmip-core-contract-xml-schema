@@ -4,7 +4,8 @@ The XML content contract, a technology of
 [xmip-core-contract](https://github.com/IlleNilsson/xmip-core-contract).
 
 Two claims. **Well-formedness is a given**: every Stream this contract sees is
-parsed, and a Stream that is not XML fails with the line and column.
+read by the estate's one XML reader (`codec::xml::tree`), and a Stream that is
+not XML fails with the line and column.
 **Conformance is a given once the contract is named**: a Receive or Send Location
 that refers to this contract with a schema bound has every Stream validated
 against that schema, and each departure is reported with the XPath of where it

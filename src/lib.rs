@@ -17,6 +17,7 @@
 pub mod check;
 pub mod schema;
 
+use codec::xml::tree::Document;
 use contract::{
     Contract, ContractDescriptor, ContractError, ContractFactory, ContractId, ValidationIssue,
     ValidationResult,
@@ -98,11 +99,11 @@ impl Contract for XmlSchema {
             Ok(text) => text,
             Err(error) => return Ok(malformed(&format!("not UTF-8 text: {error}"), None)),
         };
-        let document = match roxmltree::Document::parse(text) {
+        let document = match Document::parse(text) {
             Ok(document) => document,
             Err(error) => {
-                let position = error.pos();
-                let at = format!("line {} column {}", position.row, position.col);
+                let (line, column) = codec::xml::line_and_column(text, error.at);
+                let at = format!("line {line} column {column}");
                 return Ok(malformed(
                     &format!("not well-formed XML: {error}"),
                     Some(at),
@@ -164,14 +165,19 @@ const SETTINGS: &Settings = &Settings {
     }],
 };
 
+// Declared here and not in `tests`: a path from an inline module passes
+// through a directory named for it that does not exist, which Windows
+// forgives and Linux does not.
+#[cfg(test)]
+#[path = "../tests/measured/order.rs"]
+mod order;
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use contract::fixture::stream_as as stream;
 
-    #[path = "../../tests/measured/order.rs"]
-    mod order;
-    use order::ORDER;
+    use crate::order::ORDER;
 
     #[test]
     fn bare_contract_holds_well_formed_xml_only() {

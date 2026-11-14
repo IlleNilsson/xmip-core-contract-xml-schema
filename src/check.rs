@@ -6,15 +6,15 @@
 
 use crate::schema::{ComplexType, Content, Element, Kind, Schema};
 use codec::civil;
+use codec::xml::tree::Node;
 use contract::ValidationIssue;
 use contract::place::Place;
-use roxmltree::Node;
 
 /// Every departure of the document rooted at `root` from `schema`.
 #[must_use]
-pub fn check(schema: &Schema, root: Node) -> Vec<ValidationIssue> {
+pub fn check(schema: &Schema, root: Node<'_>) -> Vec<ValidationIssue> {
     let mut issues = Vec::new();
-    let name = root.tag_name().name();
+    let name = root.local();
     let top = Place::Root;
     let place = top.field(name);
     match schema.elements.get(name) {
@@ -31,7 +31,7 @@ pub fn check(schema: &Schema, root: Node) -> Vec<ValidationIssue> {
 fn element(
     schema: &Schema,
     declaration: &Element,
-    node: Node,
+    node: Node<'_>,
     place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
@@ -56,7 +56,7 @@ fn element(
 fn complex_type(
     schema: &Schema,
     complex: &ComplexType,
-    node: Node,
+    node: Node<'_>,
     place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
@@ -75,7 +75,7 @@ fn complex_type(
 
 fn attributes(
     complex: &ComplexType,
-    node: Node,
+    node: Node<'_>,
     place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
@@ -98,27 +98,27 @@ fn attributes(
         if present.namespace().is_some() {
             continue;
         }
-        if !complex.attributes.iter().any(|a| a.name == present.name()) {
+        if !complex.attributes.iter().any(|a| a.name == present.local()) {
             out.push(ValidationIssue::at(
                 "attribute",
                 "attribute is not declared",
-                place.attribute(present.name()).xpath(),
+                place.attribute(present.local()).xpath(),
             ));
         }
     }
 }
 
-fn reject_children(node: Node, place: &Place<'_>, out: &mut Vec<ValidationIssue>) {
-    for child in node.children().filter(Node::is_element) {
+fn reject_children(node: Node<'_>, place: &Place<'_>, out: &mut Vec<ValidationIssue>) {
+    for child in node.elements() {
         out.push(ValidationIssue::at(
             "content",
             "no child element is allowed here",
-            place.field(child.tag_name().name()).xpath(),
+            place.field(child.local()).xpath(),
         ));
     }
 }
 
-fn text_of<'a>(node: Node<'a, '_>) -> &'a str {
+fn text_of(node: Node<'_>) -> &str {
     node.text().unwrap_or("")
 }
 
@@ -128,7 +128,7 @@ fn text_of<'a>(node: Node<'a, '_>) -> &'a str {
 fn within(
     schema: &Schema,
     particle: &Element,
-    node: Node,
+    node: Node<'_>,
     place: &Place<'_>,
     count: u32,
     out: &mut Vec<ValidationIssue>,
@@ -144,16 +144,16 @@ fn within(
 fn sequence(
     schema: &Schema,
     particles: &[Element],
-    node: Node,
+    node: Node<'_>,
     place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
-    let children: Vec<Node> = node.children().filter(Node::is_element).collect();
+    let children: Vec<Node<'_>> = node.elements().collect();
     let mut next = 0;
     for particle in particles {
         let mut count = 0;
         while next < children.len()
-            && children[next].tag_name().name() == particle.name
+            && children[next].local() == particle.name
             && particle.max.is_none_or(|max| count < max)
         {
             count += 1;
@@ -166,7 +166,7 @@ fn sequence(
         out.push(ValidationIssue::at(
             "content",
             "element is not expected here",
-            place.field(child.tag_name().name()).xpath(),
+            place.field(child.local()).xpath(),
         ));
     }
 }
@@ -174,17 +174,14 @@ fn sequence(
 fn all(
     schema: &Schema,
     particles: &[Element],
-    node: Node,
+    node: Node<'_>,
     place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
-    let children: Vec<Node> = node.children().filter(Node::is_element).collect();
+    let children: Vec<Node<'_>> = node.elements().collect();
     for particle in particles {
         let mut count = 0;
-        for child in children
-            .iter()
-            .filter(|c| c.tag_name().name() == particle.name)
-        {
+        for child in children.iter().filter(|c| c.local() == particle.name) {
             count += 1;
             within(schema, particle, *child, place, count, out);
         }
@@ -196,14 +193,14 @@ fn all(
 fn choice(
     schema: &Schema,
     particles: &[Element],
-    node: Node,
+    node: Node<'_>,
     place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
-    let children: Vec<Node> = node.children().filter(Node::is_element).collect();
+    let children: Vec<Node<'_>> = node.elements().collect();
     let chosen: Vec<&Element> = particles
         .iter()
-        .filter(|p| children.iter().any(|c| c.tag_name().name() == p.name))
+        .filter(|p| children.iter().any(|c| c.local() == p.name))
         .collect();
     match chosen.as_slice() {
         [] => {
@@ -223,12 +220,12 @@ fn choice(
 
 fn unexpected(
     particles: &[Element],
-    children: &[Node],
+    children: &[Node<'_>],
     place: &Place<'_>,
     out: &mut Vec<ValidationIssue>,
 ) {
     for child in children {
-        let name = child.tag_name().name();
+        let name = child.local();
         if !particles.iter().any(|p| p.name == name) {
             out.push(ValidationIssue::at(
                 "content",
@@ -303,7 +300,7 @@ mod tests {
 
     fn issues(schema: &str, document: &str) -> Vec<(String, String)> {
         let schema = Schema::parse(schema).expect("schema");
-        let document = roxmltree::Document::parse(document).expect("document");
+        let document = codec::xml::tree::Document::parse(document).expect("document");
         check(&schema, document.root_element())
             .into_iter()
             .map(|i| (i.code.into_owned(), i.path.unwrap_or_default()))

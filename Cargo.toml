@@ -22,12 +22,9 @@ contract = { package = "xmip-core-contract", git = "https://github.com/IlleNilss
 xcore = { package = "xmip-core", git = "https://github.com/IlleNilsson/xmip-core", branch = "main" }
 stream = { package = "xmip-core-stream", git = "https://github.com/IlleNilsson/xmip-core-stream", branch = "main" }
 
-# The one real parser. Well-formedness is a genuine parse — entities, nesting,
-# namespaces — not a tag-balancing scan, and the schema is itself an XML
-# document read through the same parser. Read-only tree, no unsafe, no
-# further dependencies of note.
-roxmltree = "0.21"
-
+# The estate's one XML reader (`codec::xml::tree`): well-formedness is a
+# genuine parse — entities, nesting, namespaces — not a tag-balancing scan, and
+# the schema is itself an XML document read through the same reader. And
 # xs:date, xs:time and xs:dateTime are read by the estate's one calendar.
 codec = { package = "xmip-core-library-codec", git = "https://github.com/IlleNilsson/xmip-core-library-codec", branch = "main" }
 

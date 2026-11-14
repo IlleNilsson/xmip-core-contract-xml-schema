@@ -13,8 +13,8 @@
 //! compositors, `import` and `include`. A refused schema is a configuration
 //! error, which is where an operator wants to hear about it.
 
+use codec::xml::tree::{Document, Node};
 use contract::ContractError;
-use roxmltree::Node;
 use std::collections::BTreeMap;
 
 pub const XS: &str = "http://www.w3.org/2001/XMLSchema";
@@ -69,7 +69,7 @@ impl Schema {
     /// # Errors
     /// Not well-formed, not rooted at `xs:schema`, or outside the subset.
     pub fn parse(text: &str) -> Result<Self, ContractError> {
-        let document = roxmltree::Document::parse(text).map_err(refuse)?;
+        let document = Document::parse(text).map_err(refuse)?;
         let root = document.root_element();
         if !is_xs(root, "schema") {
             return Err(refuse("the document root is not xs:schema"));
@@ -85,8 +85,8 @@ impl Schema {
             let name = required(node, "name")?;
             schema.simple.insert(name, simple_base(node));
         }
-        for node in root.children().filter(Node::is_element) {
-            match node.tag_name().name() {
+        for node in root.elements() {
+            match node.local() {
                 "element" => {
                     let element = schema.element(node)?;
                     schema.elements.insert(element.name.clone(), element);
@@ -108,7 +108,7 @@ impl Schema {
         self.target_namespace.as_deref()
     }
 
-    fn element(&self, node: Node) -> Result<Element, ContractError> {
+    fn element(&self, node: Node<'_>) -> Result<Element, ContractError> {
         if node.has_attribute("ref") {
             return Err(refuse("xs:element ref is not supported"));
         }
@@ -144,11 +144,11 @@ impl Schema {
         }
     }
 
-    fn complex(&self, node: Node) -> Result<ComplexType, ContractError> {
+    fn complex(&self, node: Node<'_>) -> Result<ComplexType, ContractError> {
         let mut attributes = self.attributes(node);
         let mut content = Content::Empty;
-        for child in node.children().filter(Node::is_element) {
-            match child.tag_name().name() {
+        for child in node.elements() {
+            match child.local() {
                 "sequence" => content = Content::Sequence(self.particles(child)?),
                 "all" => content = Content::All(self.particles(child)?),
                 "choice" => content = Content::Choice(self.particles(child)?),
@@ -171,10 +171,10 @@ impl Schema {
         })
     }
 
-    fn particles(&self, compositor: Node) -> Result<Vec<Element>, ContractError> {
+    fn particles(&self, compositor: Node<'_>) -> Result<Vec<Element>, ContractError> {
         let mut particles = Vec::new();
-        for child in compositor.children().filter(Node::is_element) {
-            match child.tag_name().name() {
+        for child in compositor.elements() {
+            match child.local() {
                 "element" => particles.push(self.element(child)?),
                 "annotation" => {}
                 other => {
@@ -187,7 +187,7 @@ impl Schema {
         Ok(particles)
     }
 
-    fn attributes(&self, node: Node) -> Vec<Attribute> {
+    fn attributes(&self, node: Node<'_>) -> Vec<Attribute> {
         node.children()
             .filter(|n| is_xs(*n, "attribute"))
             .filter_map(|n| {
@@ -209,18 +209,18 @@ impl Schema {
     }
 }
 
-fn is_xs(node: Node, name: &str) -> bool {
-    node.is_element() && node.tag_name().name() == name && node.tag_name().namespace() == Some(XS)
+fn is_xs(node: Node<'_>, name: &str) -> bool {
+    node.is(Some(XS), name)
 }
 
-fn required(node: Node, attribute: &str) -> Result<String, ContractError> {
+fn required(node: Node<'_>, attribute: &str) -> Result<String, ContractError> {
     node.attribute(attribute)
         .map(str::to_string)
-        .ok_or_else(|| refuse(format!("xs:{} without {attribute}", node.tag_name().name())))
+        .ok_or_else(|| refuse(format!("xs:{} without {attribute}", node.local())))
 }
 
 /// `Ok(None)` is unbounded; `Err` when the attribute is present but unreadable.
-fn occurs(node: Node, attribute: &str) -> Result<Option<u32>, ()> {
+fn occurs(node: Node<'_>, attribute: &str) -> Result<Option<u32>, ()> {
     match node.attribute(attribute) {
         None => Ok(Some(1)),
         Some("unbounded") => Ok(None),
@@ -228,7 +228,7 @@ fn occurs(node: Node, attribute: &str) -> Result<Option<u32>, ()> {
     }
 }
 
-fn simple_base(node: Node) -> String {
+fn simple_base(node: Node<'_>) -> String {
     node.children()
         .find(|n| is_xs(*n, "restriction"))
         .and_then(|r| r.attribute("base"))

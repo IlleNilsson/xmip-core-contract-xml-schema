@@ -253,8 +253,7 @@ mod tests {
             factory.load("").expect("bare").descriptor().id.0,
             "xml-schema"
         );
-        let dir = std::env::temp_dir().join("xmip-xml-schema-test");
-        std::fs::create_dir_all(&dir).expect("temp dir");
+        let dir = file::temporary::Folder::new("xml-schema");
         let file = dir.join("order.xsd");
         std::fs::write(&file, ORDER).expect("write schema");
         let bound = factory
